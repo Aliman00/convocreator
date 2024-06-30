@@ -1,0 +1,98 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversation Template Editor</title>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    <main x-data="templateEditor()" class="container mx-auto p-4">
+        <h1 class="text-2xl font-bold mb-4">Conversation Template Editor</h1>
+        
+        <!-- Template Management Section -->
+        <section class="mb-4 flex items-center space-x-2">
+            <input x-model="templateName" type="text" placeholder="Template Name" class="p-2 border rounded flex" aria-label="Template Name">
+            <button @click="saveTemplate" class="bg-blue-500 text-white p-2 rounded">Save Template</button>
+            <select x-model="selectedTemplateId" class="p-2 border rounded">
+                <option value="">Select a template</option>
+                <template x-for="template in templates" :key="template.id">
+                    <option :value="template.id" x-text="template.name"></option>
+                </template>
+            </select>
+            <button @click="loadTemplate" class="bg-blue-500 text-white p-2 rounded">Load Template</button>
+        </section>
+
+        <div class="flex space-x-4">
+            <!-- Screens List -->
+            <section class="w-1/3 bg-white p-4 rounded shadow">
+                <h2 class="text-xl font-semibold mb-2">Screens</h2>
+                <ul>
+                    <template x-for="screen in screens" :key="screen.id">
+                        <li class="flex justify-between items-center mb-2">
+                            <span 
+                                @click="selectScreen(screen.id)" 
+                                :class="{'bg-blue-100': selectedScreen === screen.id}"
+                                class="cursor-pointer p-2 hover:bg-gray-100 flex-grow"
+                                x-text="screen.id_name"
+                                role="button"
+                                :aria-selected="selectedScreen === screen.id">
+                            </span>
+                            <button 
+                                @click="removeScreen(screen.id)" 
+                                class="bg-red-500 text-white p-1 rounded ml-2"
+                                :disabled="screens.length === 1"
+                                aria-label="Remove Screen">
+                                Remove
+                            </button>
+                        </li>
+                    </template>
+                </ul>
+                <button @click="addScreen" class="mt-2 bg-green-500 text-white p-2 rounded">Add Screen</button>
+            </section>
+
+            <!-- Edit Screen Section -->
+            <section x-show="selectedScreen !== null" class="w-2/3 bg-white p-4 rounded shadow">
+                <h2 class="text-xl font-semibold mb-2">Edit Screen</h2>
+                <input x-model="currentScreen.id_name" type="text" placeholder="Screen ID" class="p-2 border rounded mb-2 w-full" aria-label="Screen ID">
+                <textarea x-model="currentScreen.custom_dialog_text" placeholder="Dialog Text" class="p-2 border rounded mb-2 w-full h-32" aria-label="Dialog Text"></textarea>
+                <div class="mb-2">
+                    <label class="inline-flex items-center">
+                        <input type="checkbox" x-model="currentScreen.stop_conversation" class="form-checkbox">
+                        <span class="ml-2">Stop Conversation</span>
+                    </label>
+                </div>
+                <h3 class="font-semibold">Options</h3>
+                <template x-for="(option, index) in currentScreen.options" :key="index">
+                    <div class="flex space-x-2 mb-2">
+                        <input x-model="option.text" type="text" placeholder="Option Text" class="p-2 border rounded flex-grow" aria-label="Option Text">
+                        <button 
+                            x-show="!option.next_screen" 
+                            @click="addScreenForOption(index)" 
+                            class="bg-green-500 text-white p-2 rounded">
+                            Add Screen
+                        </button>
+                        <div x-show="option.next_screen" class="flex items-center">
+                            <span x-text="getScreenName(option.next_screen)" class="mr-2"></span>
+                        </div>
+                        <button @click="removeOption(index)" class="bg-red-500 text-white p-2 rounded" aria-label="Remove Option">Remove</button>
+                    </div>
+                </template>
+                <button @click="addOption" class="bg-blue-500 text-white p-2 rounded mt-2">Add Option</button>
+                <button @click="saveScreen" class="mt-4 bg-green-500 text-white p-2 rounded">Save Screen</button>
+            </section>
+        </div>
+
+        <!-- Lua Script Generation -->
+        <section class="mt-4">
+            <button @click="generateLua" class="bg-purple-500 text-white p-2 rounded">Generate Lua</button>
+            <pre x-show="luaScript" x-text="luaScript" class="mt-4 p-4 bg-gray-800 text-white rounded overflow-auto max-h-96"></pre>
+        </section>
+    </main>
+
+    <script src="{% static 'js/index_js.js' %}"></script>
+</body>
+</html>
