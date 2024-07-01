@@ -14,6 +14,9 @@ function templateEditor() {
         luaScript: '',
         templates: [],
         selectedTemplateId: '',
+        stfMode: false,
+        stfData: {},
+        stfFile: null,
 
         /**
          * Initializes the component by fetching templates.
@@ -60,12 +63,103 @@ function templateEditor() {
                 this.screens = template.screens;
                 this.selectedScreen = null;
                 this.currentScreen = { options: [] };
+                this.stfMode = template.stf_mode;
                 
                 await this.generateLua();
             } catch (error) {
                 console.error('Error loading template:', error);
                 alert(`Error loading template: ${error.message}`);
             }
+        },
+
+        async deleteTemplate() {
+            if (!this.selectedTemplateId) {
+                alert('Please select a template to delete');
+                return;
+            }
+        
+            if (!confirm('Are you sure you want to delete this template?')) {
+                return;
+            }
+        
+            try {
+                const response = await fetch(`/api/templates/${this.selectedTemplateId}`, {
+                    method: 'DELETE',
+                });
+        
+                if (!response.ok) {
+                    throw new Error('Failed to delete template');
+                }
+        
+                alert('Template deleted successfully');
+                this.selectedTemplateId = '';
+                this.templateId = null;
+                this.templateName = '';
+                this.screens = [];
+                this.selectedScreen = null;
+                this.currentScreen = { options: [] };
+                this.luaScript = '';
+                await this.fetchTemplates();
+            } catch (error) {
+                console.error('Error deleting template:', error);
+                alert(`Error deleting template: ${error.message}`);
+            }
+        },
+
+        /**
+         * Toggles between STF mode and regular mode
+         */
+        toggleSTFMode() {
+            this.stfMode = !this.stfMode;
+            if (this.stfMode) {
+                this.convertToSTFMode();
+            } else {
+                this.convertFromSTFMode();
+            }
+        },
+
+        /**
+         * Converts the current template to STF mode
+         */
+        convertToSTFMode() {
+            this.screens = this.screens.map(screen => {
+                const leftDialogId = `s_${this.generateUniqueId()}`;
+                this.stfData[leftDialogId] = screen.custom_dialog_text;
+                return {
+                    ...screen,
+                    leftDialog: `@conversation/${this.templateName}:${leftDialogId}`,
+                    options: screen.options.map(option => {
+                        const optionTextId = `s_${this.generateUniqueId()}`;
+                        this.stfData[optionTextId] = option.text;
+                        return {
+                            ...option,
+                            stfReference: `@conversation/${this.templateName}:${optionTextId}`
+                        };
+                    })
+                };
+            });
+        },
+
+        /**
+         * Converts the current template from STF mode to regular mode
+         */
+        convertFromSTFMode() {
+            this.screens = this.screens.map(screen => ({
+                ...screen,
+                leftDialog: this.stfData[screen.leftDialog.split(':')[1]] || '',
+                options: screen.options.map(option => ({
+                    ...option,
+                    text: this.stfData[option.stfReference.split(':')[1]] || ''
+                }))
+            }));
+            this.stfData = {};
+        },
+
+        /**
+         * Generates a unique ID for STF references
+         */
+        generateUniqueId() {
+            return Math.random().toString(36).substr(2, 8);
         },
 
         /**
@@ -88,9 +182,15 @@ function templateEditor() {
                 id: Date.now(),
                 id_name: `screen_${this.screens.length + 1}`,
                 custom_dialog_text: '',
+                leftDialog: '',
                 stop_conversation: false,
                 options: []
             };
+            if (this.stfMode) {
+                const leftDialogId = `s_${this.generateUniqueId()}`;
+                this.stfData[leftDialogId] = '';
+                newScreen.leftDialog = `@conversation/${this.templateName}:${leftDialogId}`;
+            }
             this.screens.push(newScreen);
             return newScreen;
         },
@@ -118,7 +218,13 @@ function templateEditor() {
          * Adds a new option to the current screen.
          */
         addOption() {
-            this.currentScreen.options.push({ text: '', next_screen: null });
+            const newOption = { text: '', next_screen: null };
+            if (this.stfMode) {
+                const optionTextId = `s_${this.generateUniqueId()}`;
+                this.stfData[optionTextId] = '';
+                newOption.stfReference = `@conversation/${this.templateName}:${optionTextId}`;
+            }
+            this.currentScreen.options.push(newOption);
         },
 
         /**
@@ -135,6 +241,14 @@ function templateEditor() {
         saveScreen() {
             const index = this.screens.findIndex(s => s.id === this.selectedScreen);
             if (index !== -1) {
+                if (this.stfMode) {
+                    const leftDialogId = this.currentScreen.leftDialog.split(':')[1];
+                    this.stfData[leftDialogId] = this.currentScreen.custom_dialog_text;
+                    this.currentScreen.options.forEach(option => {
+                        const optionTextId = option.stfReference.split(':')[1];
+                        this.stfData[optionTextId] = option.text;
+                    });
+                }
                 this.screens[index] = JSON.parse(JSON.stringify(this.currentScreen));
             }
         },
@@ -171,15 +285,18 @@ function templateEditor() {
             const template = {
                 id: this.templateId,
                 name: this.templateName,
+                stf_mode: this.stfMode,
                 initial_screen: this.screens.length > 0 ? this.screens[0].id : null,
                 screens: this.screens.map(screen => ({
                     id: screen.id,
                     id_name: screen.id_name,
                     custom_dialog_text: screen.custom_dialog_text,
+                    leftDialog: screen.leftDialog,
                     stop_conversation: screen.stop_conversation,
                     options: screen.options.map(option => ({
                         id: option.id,
                         text: option.text,
+                        stfReference: option.stfReference,
                         next_screen: option.next_screen
                     }))
                 }))
@@ -210,6 +327,28 @@ function templateEditor() {
                 if (!this.templateId) {
                     this.templateId = responseData.id;
                 }
+
+                // if (this.stfMode) {
+                //     const stfData = Object.entries(this.stfData).map(([id, text]) => [id, text]);
+                //     // Send STF data to the server
+                //     const stfResponse = await fetch('/api/templates/stf', {
+                //         method: 'POST',
+                //         headers: {
+                //             'Content-Type': 'application/json',
+                //         },
+                //         body: JSON.stringify({
+                //             templateName: this.templateName,
+                //             data: stfData
+                //         }),
+                //     });
+                //     if (!stfResponse.ok) {
+                //         const stfErrorData = await stfResponse.json();
+                //         throw new Error(`Failed to save STF file: ${JSON.stringify(stfErrorData)}`);
+                //     }
+                //     const stfResult = await stfResponse.json();
+                //     this.stfFile = stfResult.stfFile;
+                // }
+
                 alert('Template saved successfully');
                 await this.fetchTemplates();
             } catch (error) {
@@ -217,6 +356,22 @@ function templateEditor() {
                 alert(`Error saving template: ${error.message}`);
             }
         },
+
+        /**
+         * Generates STF data from the current template
+         */
+        // generateSTFData() {
+        //     let data = [];
+        //     this.screens.forEach(screen => {
+        //         const leftDialogId = screen.leftDialog.split(':')[1];
+        //         data.push([leftDialogId, screen.custom_dialog_text]);
+        //         screen.options.forEach(option => {
+        //             const optionTextId = option.text.split(':')[1];
+        //             data.push([optionTextId, option.custom_text || '']);
+        //         });
+        //     });
+        //     return data;
+        // },
 
         /**
          * Generates a Lua script for the current template.
@@ -238,6 +393,78 @@ function templateEditor() {
                 console.error('Error generating Lua script:', error);
                 alert(`Error generating Lua script: ${error.message}`);
             }
+        },
+
+        downloadLua() {
+            if (!this.luaScript) {
+                alert('Please generate the Lua script first.');
+                return;
+            }
+
+            const element = document.createElement('a');
+            const file = new Blob([this.luaScript], {type: 'text/plain'});
+            element.href = URL.createObjectURL(file);
+            element.download = `${this.templateName || 'script'}.lua`;
+            document.body.appendChild(element);
+            element.click();
+            document.body.removeChild(element);
+        },
+
+        async downloadSTF() {
+            if (!this.stfMode) {
+                alert('STF mode is not enabled.');
+                return;
+            }
+
+            const stfData = this.generateSTFData();
+            
+            try {
+                const response = await fetch('/api/templates/stf', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        templateName: this.templateName,
+                        data: stfData
+                    }),
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to generate STF file');
+                }
+
+                // Get the blob from the response
+                const blob = await response.blob();
+
+                // Create a link and trigger the download
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `${this.templateName || 'conversation'}.stf`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('Error downloading STF file:', error);
+                alert(`Error downloading STF file: ${error.message}`);
+            }
+        },
+
+        generateSTFData() {
+            let data = [];
+            this.screens.forEach(screen => {
+                const leftDialogId = screen.leftDialog.split(':')[1];
+                data.push([leftDialogId, screen.custom_dialog_text]);
+                screen.options.forEach(option => {
+                    const optionTextId = option.stfReference.split(':')[1];
+                    data.push([optionTextId, option.text]);
+                });
+            });
+            return data;
         }
+
+
     };
 }

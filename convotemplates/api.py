@@ -5,14 +5,24 @@ from .models import ConvoTemplate, ConvoScreen, ConvoOption
 from typing import List, Optional
 import logging
 from ninja.errors import HttpError
+from stfwriter import STFWriter
+import os
+from io import BytesIO
+from django.http import HttpResponse
 
 api = NinjaAPI()
 logger = logging.getLogger(__name__)
 
 
+class STFPayload(Schema):
+    templateName: str
+    data: List[List[str]]
+
+
 class OptionSchema(Schema):
     id: Optional[int] = None
     text: str
+    stfReference: Optional[str] = None
     next_screen: Optional[int] = None
 
 
@@ -20,6 +30,7 @@ class ScreenSchema(Schema):
     id: Optional[int] = None
     id_name: str
     custom_dialog_text: str
+    leftDialog: Optional[str] = None
     stop_conversation: bool
     options: List[OptionSchema]
 
@@ -27,8 +38,52 @@ class ScreenSchema(Schema):
 class TemplateSchema(Schema):
     id: Optional[int] = None
     name: str
+    stf_mode: bool
     initial_screen: Optional[int] = None
     screens: List[ScreenSchema]
+
+
+# @api.post("/templates/stf")
+# def create_stf_file(request, payload: STFPayload):
+#     """
+#     Create an STF file from the provided data.
+#     """
+#     try:
+#         writer = STFWriter()
+#         template_name = payload.templateName
+#         data = payload.data
+#         stf_path = os.path.join(
+#             '/home/almin/Workspace/convotemp/', f"{template_name}.stf")
+#         writer.save_data(data, stf_path)
+#         return {"stfFile": stf_path}
+#     except Exception as e:
+#         logger.error(f"Error creating STF file: {str(e)}")
+#         raise HttpError(400, f"Error creating STF file: {str(e)}")
+
+
+@api.post("/templates/stf")
+def create_stf_file(request, payload: STFPayload):
+    """
+    Create an STF file from the provided data and return it for download.
+    """
+    try:
+        writer = STFWriter()
+        template_name = payload.templateName
+        data = payload.data
+
+        # Use BytesIO to store the file in memory
+        stf_buffer = BytesIO()
+        writer.save_data(data, stf_buffer)
+
+        # Create a response with the STF file
+        response = HttpResponse(stf_buffer.getvalue(),
+                                content_type='application/octet-stream')
+        response['Content-Disposition'] = f'attachment; filename="{
+            template_name}.stf"'
+        return response
+    except Exception as e:
+        logger.error(f"Error creating STF file: {str(e)}")
+        raise HttpError(400, f"Error creating STF file: {str(e)}")
 
 
 @api.post("/templates", response=TemplateSchema)
@@ -72,13 +127,11 @@ def create_template(request, template: TemplateSchema):
 
 @api.put("/templates/{template_id}", response=TemplateSchema)
 def update_template(request, template_id: int, template: TemplateSchema):
-    """
-    Update an existing conversation template.
-    """
     try:
         with transaction.atomic():
             db_template = get_object_or_404(ConvoTemplate, id=template_id)
             db_template.name = template.name
+            db_template.stf_mode = template.stf_mode  # Add this line
             db_template.save()
 
             db_template.screens.all().delete()
@@ -89,6 +142,7 @@ def update_template(request, template_id: int, template: TemplateSchema):
                     template=db_template,
                     id_name=screen_data.id_name,
                     custom_dialog_text=screen_data.custom_dialog_text,
+                    leftDialog=screen_data.leftDialog,  # Add this line
                     stop_conversation=screen_data.stop_conversation
                 )
                 screen_map[screen_data.id] = screen
@@ -99,6 +153,7 @@ def update_template(request, template_id: int, template: TemplateSchema):
                     ConvoOption.objects.create(
                         screen=screen,
                         text=option_data.text,
+                        stfReference=option_data.stfReference,  # Add this line
                         next_screen=screen_map.get(option_data.next_screen)
                     )
 
@@ -128,11 +183,9 @@ def delete_template(request, template_id: int):
 
 @api.get("/templates/{template_id}/lua")
 def generate_lua(request, template_id: int):
-    """
-    Generate Lua script for a conversation template.
-    """
     try:
         template = get_object_or_404(ConvoTemplate, id=template_id)
+        print(f"Template STF mode: {template.stf_mode}")  # Add this line
         lua_script = _generate_lua_script(template)
         return {"lua_script": lua_script}
     except Exception as e:
@@ -159,12 +212,10 @@ def get_template(request, template_id: int):
 
 
 def _template_to_schema(template: ConvoTemplate, include_screens: bool = True) -> dict:
-    """
-    Convert a ConvoTemplate instance to a dictionary matching TemplateSchema.
-    """
     result = {
         "id": template.id,
         "name": template.name,
+        "stf_mode": template.stf_mode,
         "initial_screen": template.initial_screen.id if template.initial_screen else None,
     }
     if include_screens:
@@ -173,11 +224,13 @@ def _template_to_schema(template: ConvoTemplate, include_screens: bool = True) -
                 "id": screen.id,
                 "id_name": screen.id_name,
                 "custom_dialog_text": screen.custom_dialog_text,
+                "leftDialog": screen.leftDialog,
                 "stop_conversation": screen.stop_conversation,
                 "options": [
                     {
                         "id": option.id,
                         "text": option.text,
+                        "stfReference": option.stfReference,
                         "next_screen": option.next_screen.id if option.next_screen else None
                     } for option in screen.options.all()
                 ]
@@ -189,42 +242,71 @@ def _template_to_schema(template: ConvoTemplate, include_screens: bool = True) -
 
 
 def _generate_lua_script(template: ConvoTemplate) -> str:
-    """
-    Generate Lua script for a given template.
-    """
-    lua_script = f"{template.name}_convo_template = ConvoTemplate:new {{\n"
+    print(f"Generating Lua script for template: {
+          template.name}, STF mode: {template.stf_mode}")
+
+    lua_script = f"{template.name}ConvoTemplate = ConvoTemplate:new {{\n"
     lua_script += f"    initialScreen = \"{
         template.initial_screen.id_name if template.initial_screen else ''}\",\n"
     lua_script += "    templateType = \"Lua\",\n"
-    lua_script += f"    luaClassHandler = \"{
-        template.name}ConversationHandler\",\n"
+    lua_script += f"    luaClassHandler = \"{template.name}ConvoHandler\",\n"
     lua_script += "    screens = {}\n"
     lua_script += "}\n\n"
 
     for screen in template.screens.all():
+        print(f"Processing screen: {screen.id_name}")
+        print(f"leftDialog: {screen.leftDialog}")
+        print(f"custom_dialog_text: {screen.custom_dialog_text}")
         lua_script += f"{screen.id_name} = ConvoScreen:new{{\n"
         lua_script += f"    id = \"{screen.id_name}\",\n"
-        lua_script += "    left_dialog = \"\",\n"
-        lua_script += f"    customDialogText = \"{
-            screen.custom_dialog_text}\",\n"
-        lua_script += f"    stopConversation = {
-            str(screen.stop_conversation).lower()},\n"
+
+        if template.stf_mode and screen.leftDialog:
+            lua_script += f"    leftDialog = \"{screen.leftDialog}\",\n"
+        else:
+            lua_script += f"    leftDialog = \"{
+                screen.custom_dialog_text}\",\n"
+
+        lua_script += f"    stopConversation = \"{
+            str(screen.stop_conversation).lower()}\",\n"
         lua_script += "    options = {\n"
 
         options = list(screen.options.all())
         for i, option in enumerate(options):
+            print(f"Processing option: {option.text}")
+            print(f"STF Reference: {option.stfReference}")
             next_screen_id = option.next_screen.id_name if option.next_screen else ''
-            lua_script += f"        {{\"{option.text}\", \"{next_screen_id}\"}}"
+
+            option_text = option.stfReference if template.stf_mode and option.stfReference else option.text
+
+            lua_script += f"        {{\"{option_text}\", \"{next_screen_id}\"}}"
             if i < len(options) - 1:
                 lua_script += ","
             lua_script += "\n"
 
         lua_script += "    }\n"
         lua_script += "}\n"
-        lua_script += f"{template.name}_convo_template:addScreen({
+        lua_script += f"{template.name}ConvoTemplate:addScreen({
             screen.id_name});\n\n"
 
-    lua_script += f'addConversationTemplate("{template.name}_convo_template", {
-        template.name}_convo_template);\n'
+    lua_script += f"addConversationTemplate(\"{template.name}ConvoTemplate\", {
+        template.name}ConvoTemplate);\n"
 
     return lua_script
+
+
+# @api.post("/templates/stf")
+# def create_stf_file(request, payload: dict):
+#     """
+#     Create an STF file from the provided data.
+#     """
+#     try:
+#         writer = STFWriter()
+#         template_name = payload['templateName']
+#         data = payload['data']
+#         stf_path = os.path.join(
+#             'path_to_your_stf_directory', f"{template_name}.stf")
+#         writer.save_data(data, stf_path)
+#         return {"stfFile": stf_path}
+#     except Exception as e:
+#         logger.error(f"Error creating STF file: {str(e)}")
+#         raise HttpError(400, f"Error creating STF file: {str(e)}")
