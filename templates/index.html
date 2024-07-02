@@ -11,23 +11,30 @@
 </head>
 <body class="bg-gray-100">
     <main x-data="templateEditor()" class="container mx-auto p-4">
+        <!-- Title and STF Mode Toggle -->
         <h1 class="text-2xl font-bold mb-4">Conversation Template Editor</h1>
         <button @click="toggleSTFMode" class="bg-yellow-500 text-white p-2 rounded mb-4" x-text="stfMode ? 'Disable STF Mode' : 'Enable STF Mode'"></button>
-        
+
         <!-- Template Management Section -->
         <section class="mb-4 flex items-center space-x-2">
+            <!-- Template Name Input -->
             <input x-model="templateName" type="text" placeholder="Template Name" class="p-2 border rounded flex-grow" aria-label="Template Name">
+            <!-- Save Template Button -->
             <button @click="saveTemplate" class="bg-blue-500 text-white p-2 rounded">Save Template</button>
+            <!-- Select Template Dropdown -->
             <select x-model="selectedTemplateId" class="p-2 border rounded">
                 <option value="">Select a template</option>
                 <template x-for="template in templates" :key="template.id">
                     <option :value="template.id" x-text="template.name"></option>
                 </template>
             </select>
+            <!-- Load Template Button -->
             <button @click="loadTemplate" class="bg-blue-500 text-white p-2 rounded">Load Template</button>
+            <!-- Delete Template Button -->
             <button @click="deleteTemplate" class="bg-red-500 text-white p-2 rounded">Delete Template</button>
         </section>
 
+        <!-- Screens and Edit Screen Sections -->
         <div class="flex space-x-4">
             <!-- Screens List -->
             <section class="w-1/3 bg-white p-4 rounded shadow">
@@ -35,16 +42,18 @@
                 <ul>
                     <template x-for="screen in screens" :key="screen.id">
                         <li class="flex justify-between items-center mb-2">
-                            <span 
-                                @click="selectScreen(screen.id)" 
+                            <!-- Screen ID -->
+                            <span
+                                @click="selectScreen(screen.id)"
                                 :class="{'bg-blue-100': selectedScreen === screen.id}"
                                 class="cursor-pointer p-2 hover:bg-gray-100 flex-grow"
                                 x-text="screen.id_name"
                                 role="button"
                                 :aria-selected="selectedScreen === screen.id">
                             </span>
-                            <button 
-                                @click="removeScreen(screen.id)" 
+                            <!-- Remove Screen Button -->
+                            <button
+                                @click="removeScreen(screen.id)"
                                 class="bg-red-500 text-white p-1 rounded ml-2"
                                 :disabled="screens.length === 1"
                                 aria-label="Remove Screen">
@@ -53,32 +62,39 @@
                         </li>
                     </template>
                 </ul>
+                <!-- Add Screen Button -->
                 <button @click="addScreen" class="mt-2 bg-green-500 text-white p-2 rounded">Add Screen</button>
             </section>
 
             <!-- Edit Screen Section -->
             <section x-show="selectedScreen !== null" class="w-2/3 bg-white p-4 rounded shadow">
                 <h2 class="text-xl font-semibold mb-2">Edit Screen</h2>
+                <!-- Screen ID Input -->
                 <input x-model="currentScreen.id_name" type="text" placeholder="Screen ID" class="p-2 border rounded mb-2 w-full" aria-label="Screen ID">
+                <!-- Dialog Text Area -->
                 <textarea x-model="currentScreen.custom_dialog_text" placeholder="Dialog Text" class="p-2 border rounded mb-2 w-full h-32" aria-label="Dialog Text"></textarea>
+                <!-- STF Reference -->
                 <div x-show="stfMode" class="mb-2">
                     <span class="text-sm text-gray-600">STF Reference: </span>
                     <span x-text="currentScreen.leftDialog || 'Not set'"></span>
                 </div>
+                <!-- Stop Conversation Checkbox -->
                 <div class="mb-2">
                     <label class="inline-flex items-center">
                         <input type="checkbox" x-model="currentScreen.stop_conversation" class="form-checkbox">
                         <span class="ml-2">Stop Conversation</span>
                     </label>
                 </div>
+                <!-- Options Section -->
                 <h3 class="font-semibold">Options</h3>
                 <template x-for="(option, index) in currentScreen.options" :key="index">
+                    <!-- Option Text Input and Buttons -->
                     <div class="flex flex-col space-y-2 mb-4">
                         <div class="flex space-x-2">
                             <input x-model="option.text" type="text" placeholder="Option Text" class="p-2 border rounded flex-grow" aria-label="Option Text">
-                            <button 
-                                x-show="!option.next_screen" 
-                                @click="addScreenForOption(index)" 
+                            <button
+                                x-show="!option.next_screen"
+                                @click="addScreenForOption(index)"
                                 class="bg-green-500 text-white p-2 rounded">
                                 Add Screen
                             </button>
@@ -87,31 +103,39 @@
                             </div>
                             <button @click="removeOption(index)" class="bg-red-500 text-white p-2 rounded" aria-label="Remove Option">Remove</button>
                         </div>
+                        <!-- Option STF Reference -->
                         <div x-show="stfMode" class="text-sm text-gray-600">
                             STF Reference: <span x-text="option.stfReference || 'Not set'"></span>
                         </div>
                     </div>
                 </template>
+                <!-- Add Option Button -->
                 <button @click="addOption" class="bg-blue-500 text-white p-2 rounded mt-2">Add Option</button>
+                <!-- Save Screen Button -->
                 <button @click="saveScreen" class="mt-4 bg-green-500 text-white p-2 rounded">Save Screen</button>
             </section>
         </div>
 
-        <!-- Lua Script Generation -->
+        <!-- Lua Script Generation Section -->
         <section class="mt-4">
+            <!-- Generate Lua Button -->
             <button @click="generateLua" class="bg-purple-500 text-white p-2 rounded">Generate Lua</button>
+            <!-- Download Lua Button -->
             <button x-show="luaScript" @click="downloadLua()" class="bg-green-500 text-white p-2 rounded">Download Lua</button>
+            <!-- Download STF Button -->
             <button x-show="stfMode" @click="downloadSTF()" class="bg-blue-500 text-white p-2 rounded">Download STF</button>
+            <!-- Lua Script Preview -->
             <pre x-show="luaScript" x-text="luaScript" class="mt-4 p-4 bg-gray-800 text-white rounded overflow-auto max-h-96"></pre>
         </section>
 
-        <!-- STF File Information -->
+        <!-- STF File Information Section -->
         <section x-show="stfMode && stfFile" class="mt-4">
             <h3 class="text-lg font-semibold">STF File</h3>
             <p>File path: <span x-text="stfFile"></span></p>
         </section>
     </main>
 
+    <!-- Include index_js.js -->
     <script src="{% static 'js/index_js.js' %}"></script>
 </body>
 </html>

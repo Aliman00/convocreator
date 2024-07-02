@@ -6,6 +6,7 @@
  */
 function templateEditor() {
     return {
+        // State variables
         templateId: null,
         templateName: '',
         screens: [],
@@ -65,6 +66,25 @@ function templateEditor() {
                 this.currentScreen = { options: [] };
                 this.stfMode = template.stf_mode;
                 
+                // Handle stfData
+                if (template.stf_mode) {
+                    this.stfData = {};
+                    this.screens.forEach(screen => {
+                        if (screen.leftDialog) {
+                            const leftDialogId = screen.leftDialog.split(':')[1];
+                            this.stfData[leftDialogId] = screen.custom_dialog_text;
+                        }
+                        screen.options.forEach(option => {
+                            if (option.stfReference) {
+                                const optionTextId = option.stfReference.split(':')[1];
+                                this.stfData[optionTextId] = option.text;
+                            }
+                        });
+                    });
+                } else {
+                    this.stfData = {};
+                }
+                
                 await this.generateLua();
             } catch (error) {
                 console.error('Error loading template:', error);
@@ -72,6 +92,9 @@ function templateEditor() {
             }
         },
 
+        /**
+         * Deletes the selected template from the server.
+         */
         async deleteTemplate() {
             if (!this.selectedTemplateId) {
                 alert('Please select a template to delete');
@@ -92,18 +115,28 @@ function templateEditor() {
                 }
         
                 alert('Template deleted successfully');
-                this.selectedTemplateId = '';
-                this.templateId = null;
-                this.templateName = '';
-                this.screens = [];
-                this.selectedScreen = null;
-                this.currentScreen = { options: [] };
-                this.luaScript = '';
+                this.resetEditorState();
                 await this.fetchTemplates();
             } catch (error) {
                 console.error('Error deleting template:', error);
                 alert(`Error deleting template: ${error.message}`);
             }
+        },
+
+        /**
+         * Resets the editor state.
+         */
+        resetEditorState() {
+            this.selectedTemplateId = '';
+            this.templateId = null;
+            this.templateName = '';
+            this.screens = [];
+            this.selectedScreen = null;
+            this.currentScreen = { options: [] };
+            this.luaScript = '';
+            this.stfMode = false;
+            this.stfData = {};
+            this.stfFile = null;
         },
 
         /**
@@ -116,6 +149,11 @@ function templateEditor() {
             } else {
                 this.convertFromSTFMode();
             }
+            
+            // Update currentScreen if one is selected
+            if (this.selectedScreen !== null) {
+                this.currentScreen = JSON.parse(JSON.stringify(this.screens.find(s => s.id === this.selectedScreen)));
+            }
         },
 
         /**
@@ -123,13 +161,13 @@ function templateEditor() {
          */
         convertToSTFMode() {
             this.screens = this.screens.map(screen => {
-                const leftDialogId = `s_${this.generateUniqueId()}`;
+                const leftDialogId = screen.leftDialog ? screen.leftDialog.split(':')[1] : `s_${this.generateUniqueId()}`;
                 this.stfData[leftDialogId] = screen.custom_dialog_text;
                 return {
                     ...screen,
                     leftDialog: `@conversation/${this.templateName}:${leftDialogId}`,
                     options: screen.options.map(option => {
-                        const optionTextId = `s_${this.generateUniqueId()}`;
+                        const optionTextId = option.stfReference ? option.stfReference.split(':')[1] : `s_${this.generateUniqueId()}`;
                         this.stfData[optionTextId] = option.text;
                         return {
                             ...option,
@@ -139,17 +177,17 @@ function templateEditor() {
                 };
             });
         },
-
+        
         /**
          * Converts the current template from STF mode to regular mode
          */
         convertFromSTFMode() {
             this.screens = this.screens.map(screen => ({
                 ...screen,
-                leftDialog: this.stfData[screen.leftDialog.split(':')[1]] || '',
+                custom_dialog_text: screen.leftDialog ? (this.stfData[screen.leftDialog.split(':')[1]] || screen.custom_dialog_text) : screen.custom_dialog_text,
                 options: screen.options.map(option => ({
                     ...option,
-                    text: this.stfData[option.stfReference.split(':')[1]] || ''
+                    text: option.stfReference ? (this.stfData[option.stfReference.split(':')[1]] || option.text) : option.text
                 }))
             }));
             this.stfData = {};
@@ -177,6 +215,9 @@ function templateEditor() {
          * Adds a new screen to the template.
          * @returns {Object} The newly created screen.
          */
+
+
+
         addScreen() {
             const newScreen = {
                 id: Date.now(),
@@ -328,27 +369,6 @@ function templateEditor() {
                     this.templateId = responseData.id;
                 }
 
-                // if (this.stfMode) {
-                //     const stfData = Object.entries(this.stfData).map(([id, text]) => [id, text]);
-                //     // Send STF data to the server
-                //     const stfResponse = await fetch('/api/templates/stf', {
-                //         method: 'POST',
-                //         headers: {
-                //             'Content-Type': 'application/json',
-                //         },
-                //         body: JSON.stringify({
-                //             templateName: this.templateName,
-                //             data: stfData
-                //         }),
-                //     });
-                //     if (!stfResponse.ok) {
-                //         const stfErrorData = await stfResponse.json();
-                //         throw new Error(`Failed to save STF file: ${JSON.stringify(stfErrorData)}`);
-                //     }
-                //     const stfResult = await stfResponse.json();
-                //     this.stfFile = stfResult.stfFile;
-                // }
-
                 alert('Template saved successfully');
                 await this.fetchTemplates();
             } catch (error) {
@@ -356,22 +376,6 @@ function templateEditor() {
                 alert(`Error saving template: ${error.message}`);
             }
         },
-
-        /**
-         * Generates STF data from the current template
-         */
-        // generateSTFData() {
-        //     let data = [];
-        //     this.screens.forEach(screen => {
-        //         const leftDialogId = screen.leftDialog.split(':')[1];
-        //         data.push([leftDialogId, screen.custom_dialog_text]);
-        //         screen.options.forEach(option => {
-        //             const optionTextId = option.text.split(':')[1];
-        //             data.push([optionTextId, option.custom_text || '']);
-        //         });
-        //     });
-        //     return data;
-        // },
 
         /**
          * Generates a Lua script for the current template.
@@ -395,6 +399,9 @@ function templateEditor() {
             }
         },
 
+        /**
+         * Downloads the generated Lua script.
+         */
         downloadLua() {
             if (!this.luaScript) {
                 alert('Please generate the Lua script first.');
@@ -410,6 +417,9 @@ function templateEditor() {
             document.body.removeChild(element);
         },
 
+        /**
+         * Downloads the STF file.
+         */
         async downloadSTF() {
             if (!this.stfMode) {
                 alert('STF mode is not enabled.');
@@ -452,6 +462,10 @@ function templateEditor() {
             }
         },
 
+        /**
+         * Generates STF data from the current template
+         * @returns {Array} An array of STF data entries
+         */
         generateSTFData() {
             let data = [];
             this.screens.forEach(screen => {
@@ -464,7 +478,5 @@ function templateEditor() {
             });
             return data;
         }
-
-
     };
 }
